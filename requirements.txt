@@ -1,0 +1,11 @@
+pandas
+numpy
+scikit-learn
+streamlit
+plotly
+anthropic
+torch
+shap
+tidy3d
+photonforge
+gdstk

@@ -1,0 +1,18 @@
+# Secrets — never commit
+.streamlit/secrets.toml
+
+# macOS
+.DS_Store
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+.ipynb_checkpoints/
+
+# Editor
+.vscode/
+.idea/
