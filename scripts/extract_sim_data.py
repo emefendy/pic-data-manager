@@ -119,10 +119,11 @@ def _loss_bandwidth_ghz(ldas_um: np.ndarray, loss_db: np.ndarray, margin_db: flo
     if len(in_band) < 2:
         return 0.0
     lda_min, lda_max = np.min(in_band), np.max(in_band)
-    # Convert wavelength bandwidth to frequency bandwidth in GHz
-    f_min = td.C_0 / lda_max  # THz
-    f_max = td.C_0 / lda_min
-    return float((f_max - f_min) * 1e3)  # THz → GHz
+    # Convert wavelength bandwidth to frequency bandwidth in GHz.
+    # In Tidy3D units (length in µm), td.C_0 / lambda_um is in Hz, so divide by 1e9.
+    f_min = td.C_0 / lda_max  # Hz
+    f_max = td.C_0 / lda_min  # Hz
+    return float((f_max - f_min) / 1e9)  # Hz → GHz
 
 
 # ── Schema mapping ────────────────────────────────────────────────────────────

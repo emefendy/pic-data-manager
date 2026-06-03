@@ -183,9 +183,9 @@ def extract_and_ingest(design_id, sim_data_euler, sim_data_circular, freqs, para
         in_band   = ldas[loss_db <= threshold]
         if len(in_band) < 2:
             return 0.0
-        f_min = td.C_0 / np.max(in_band)
-        f_max = td.C_0 / np.min(in_band)
-        return float((f_max - f_min) * 1e3)
+        f_min = td.C_0 / np.max(in_band)  # Hz (Tidy3D units: length in µm)
+        f_max = td.C_0 / np.min(in_band)  # Hz
+        return float((f_max - f_min) / 1e9)  # Hz → GHz
 
     scalars = {
         "simulated_loss_db":              float(np.mean(loss_euler)),
