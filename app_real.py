@@ -66,11 +66,9 @@ PLOT_LAYOUT = dict(
 )
 PALETTE = ["#7c3aed", "#06b6d4", "#ec4899", "#f97316", "#10b981", "#a855f7"]
 
-try:
-    import statsmodels.api as _sm
-    TRENDLINE = "ols"
-except Exception:
-    TRENDLINE = None
+import importlib.util
+
+TRENDLINE = "ols" if importlib.util.find_spec("statsmodels") else None
 
 _FMT_COLORS = {"DuckDB": ("#ede9fe", "#7c3aed"), "Parquet": ("#cffafe", "#0e7490"),
                "Zarr": ("#fef3c7", "#b45309"), "SQLite": ("#e2e8f0", "#475569"),
@@ -258,9 +256,114 @@ def _component_record(device_type: str):
 
 
 @st.cache_data(show_spinner=False)
+def _opt_records(device_type: str):
+    return dd.load_optimization_records(device_type)
+
+
+@st.cache_data(show_spinner="Fitting the GP loss landscape…")
+def _gp_surface(h_bend: float):
+    from sklearn.gaussian_process import GaussianProcessRegressor
+    from sklearn.gaussian_process.kernels import ConstantKernel, Matern, WhiteKernel
+
+    df = _tidy3d_designs()
+    yj = df[df["device_type"] == "y_junction"].dropna(
+        subset=["geom_w7", "geom_h_bend", "geom_l_junction", "simulated_loss_db"])
+    X = yj[["geom_w7", "geom_h_bend", "geom_l_junction"]].to_numpy(float)
+    y = yj["simulated_loss_db"].to_numpy(float)
+    kernel = (ConstantKernel(1.0)
+              * Matern(length_scale=[0.15, 0.4, 0.4], nu=2.5,
+                       length_scale_bounds=[(0.05, 1.0), (0.2, 2.0), (0.25, 2.0)])
+              + WhiteKernel(1e-6, noise_level_bounds=(1e-12, 1e-2)))
+    gp = GaussianProcessRegressor(kernel=kernel, normalize_y=True,
+                                  n_restarts_optimizer=3, random_state=0)
+    import warnings
+
+    from sklearn.exceptions import ConvergenceWarning
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", ConvergenceWarning)
+        gp.fit(X, y)
+    w7g = np.linspace(1.2, 1.6, 35)
+    lg = np.linspace(1.5, 3.0, 45)
+    W, L = np.meshgrid(w7g, lg)
+    P = np.column_stack([W.ravel(), np.full(W.size, h_bend), L.ravel()])
+    Z = gp.predict(P).reshape(W.shape)
+    pts = yj[(yj["geom_h_bend"] - h_bend).abs() <= 0.25]
+    return (w7g, lg, Z,
+            pts["geom_w7"].to_numpy(), pts["geom_l_junction"].to_numpy(),
+            pts["simulated_loss_db"].to_numpy(),
+            pts["geom_h_bend"].to_numpy(), pts["design_id"].to_numpy(),
+            pts["design_id"].astype(str).str.startswith("D_YJ_OPT").to_numpy(),
+            len(yj))
+
+
+def _pid_alive(pid):
+    import os
+    try:
+        os.kill(int(pid), 0)
+        return True
+    except Exception:
+        return False
+
+
+def _live_optimizer_panel():
+    import subprocess
+
+    log_path = dd.ROOT / "data" / "tidy3d_processed" / "optimize_live.log"
+    pid = st.session_state.get("opt_pid")
+    running = pid is not None and _pid_alive(pid)
+
+    with st.expander("🚀 Run a live closed-loop study (submits real Tidy3D jobs — "
+                     "costs FlexCredits)", expanded=running):
+        st.markdown(
+            "Launches `scripts/optimize_yjunction.py`: **Bayesian optimization over "
+            "all three swept parameters simultaneously** — a Gaussian process is "
+            "first fitted to **every existing sweep design** (free seed data), then "
+            "expected improvement proposes new (w7, h_bend, l_junction) "
+            "combinations, one **real FDTD job per proposal** on your Flexcompute "
+            "account. Every result is ingested with full provenance and the study "
+            "appears below when done.")
+        st.markdown(
+            "**Varied (simultaneously):** w7 ∈ [1.2, 1.6] µm · h_bend ∈ [1.5, 2.5] "
+            "µm · l_junction ∈ [1.5, 3.0] µm. **Held constant:** w1 = 0.5 µm, "
+            "t = 0.22 µm, wavelength band 1.5–1.6 µm.")
+        mx = st.number_input("Max new FDTD jobs", value=6, min_value=1, max_value=12,
+                             step=1, key="opt_mx")
+        sure = st.checkbox("I understand this submits real jobs to my Flexcompute "
+                           "account and costs FlexCredits", key="opt_sure")
+        if st.button("▶ Launch study", disabled=(not sure) or running, key="opt_go"):
+            log_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(log_path, "w") as lf:
+                proc = subprocess.Popen(
+                    [sys.executable, str(dd.ROOT / "scripts" / "optimize_yjunction.py"),
+                     "--max-evals", str(int(mx))],
+                    stdout=lf, stderr=subprocess.STDOUT, cwd=str(dd.ROOT))
+            st.session_state["opt_pid"] = proc.pid
+            st.rerun()
+
+        if pid is not None:
+            if running:
+                st.info(f"Study running (pid {pid}) — each FDTD job takes a few "
+                        "minutes. Refresh to follow the log.")
+            else:
+                st.success("Study finished — reload results to see the new study "
+                           "in the dropdown below.")
+            if log_path.exists():
+                tail = log_path.read_text().splitlines()[-25:]
+                st.code("\n".join(tail) or "(no output yet)")
+            b1, b2 = st.columns(2)
+            if b1.button("🔄 Refresh log", key="opt_refresh"):
+                st.rerun()
+            if not running and b2.button("📥 Reload results", key="opt_reload"):
+                st.session_state.pop("opt_pid", None)
+                st.cache_data.clear()
+                st.rerun()
+
+
+@st.cache_data(show_spinner=False)
 def _spectra_long(device_type: str, param: str):
     alld = dd.load_tidy3d_designs()
     sub = alld[alld["device_type"] == device_type]
+    sub = sub[~sub["design_id"].astype(str).str.startswith("D_YJ_OPT")]
     rows = []
     for _, r in sub.iterrows():
         spec = dd.load_spectrum(r["design_id"])
@@ -319,8 +422,184 @@ def render_tidy3d(device_type: str, nice: str):
     k3.metric("Best loss", f"{df['simulated_loss_db'].min():.3f} dB")
     k4.metric("Geometry params", len(feats))
 
-    t_ov, t_meta, t_lib = st.tabs(
-        ["  Overview  ", "  Component Metadata  ", "  Design Library & Spectra  "])
+    labels = ["  Overview  ", "  Component Metadata  ", "  Design Library & Spectra  "]
+    if device_type == "y_junction":
+        labels.append("  Optimization  ")
+    tabs = st.tabs(labels)
+    t_ov, t_meta, t_lib = tabs[0], tabs[1], tabs[2]
+
+    if device_type == "y_junction":
+        with tabs[3]:
+            section(f"{nice} — optimization",
+                    "Gradient-free search over l_junction; every candidate is stored "
+                    "as an OptimizationRecord linked to its SimulationRun")
+            _live_optimizer_panel()
+
+            st.markdown("#### Loss landscape — what the optimizer sees")
+            st.caption("Axes: x = w7, y = l_junction, **z (height) = mean insertion "
+                       "loss — the quantity being minimized**, so the optimum is the "
+                       "deepest valley. The problem has a third parameter (h_bend) "
+                       "that a 3-D plot can't show as an axis — pick its slice:")
+            hb = st.radio("h_bend (µm) — 3rd parameter, sliced for this view",
+                          [1.5, 2.0, 2.5], horizontal=True, key="opt_hb_radio")
+            w7g, lg, Z, px_, py_, pz_, phb_, pid_, popt_, n_fit = _gp_surface(float(hb))
+            fig3 = go.Figure()
+            fig3.add_trace(go.Surface(
+                x=w7g, y=lg, z=Z, colorscale="Plasma", opacity=0.92,
+                colorbar=dict(title="loss (dB)", len=0.6),
+                hovertemplate=("w7 = %{x:.3f} µm · l_junction = %{y:.3f} µm"
+                               "<br>GP-predicted loss = %{z:.4f} dB"
+                               "<extra>GP surface</extra>")))
+            for mask, color, label in [(~popt_, "#06b6d4", "original sweep design"),
+                                       (popt_, "#ec4899", "new BO-proposed design")]:
+                if mask.any():
+                    fig3.add_trace(go.Scatter3d(
+                        x=px_[mask], y=py_[mask], z=pz_[mask], mode="markers",
+                        marker=dict(size=4.5, color=color,
+                                    line=dict(width=1, color="white")),
+                        customdata=np.column_stack([pid_[mask], phb_[mask]]),
+                        hovertemplate=("<b>%{customdata[0]}</b>"
+                                       "<br>w7 = %{x:.3f} µm · l_junction = %{y:.3f} µm"
+                                       " · h_bend = %{customdata[1]:.3f} µm"
+                                       "<br>measured loss = %{z:.4f} dB"
+                                       f"<extra>{label}</extra>"),
+                        name=label))
+            fig3.update_layout(
+                title="GP loss landscape",
+                scene=dict(xaxis_title="w7 (µm)", yaxis_title="l_junction (µm)",
+                           zaxis_title="mean insertion loss (dB)"),
+                height=540, margin=dict(t=40, l=0, r=0, b=0),
+                showlegend=True, legend=dict(orientation="h", y=0.02))
+            st.plotly_chart(style_fig(fig3), use_container_width=True,
+                            key=f"opt_surface_{device_type}")
+            st.caption("The 3-D view is hover-only (Plotly can't report clicks in 3-D "
+                       "scenes) — use the 2-D plots below to click-highlight table rows.")
+            st.markdown("<hr style='margin:.8rem 0;'>", unsafe_allow_html=True)
+
+            recs = _opt_records(device_type)
+            if recs.empty:
+                st.info("No optimization studies yet. Launch the live loop above "
+                        "(or run `python scripts/optimize_yjunction.py`) — when it "
+                        "finishes, the progress plot and per-iteration table "
+                        "populate here automatically.")
+            else:
+                runs_ = list(dict.fromkeys(recs["study_id"]))
+                sid = st.selectbox(
+                    "Loop run", runs_, index=len(runs_) - 1,
+                    format_func=lambda s: f"Run {runs_.index(s) + 1} — {s}",
+                    key=f"opt_study_{device_type}")
+                d = recs[recs["study_id"] == sid].reset_index(drop=True)
+                d["l_junction"] = d["parameters"].map(lambda p: p.get("l_junction"))
+                extras = [c for c in ("w7", "h_bend")
+                          if d["parameters"].map(lambda p: c in p).any()]
+                for c in extras:
+                    d[c] = d["parameters"].map(lambda p, c=c: p.get(c))
+                p0 = d["parameters"].iloc[0]
+                live = "seed_best_db" in p0
+                best = float(d["best_so_far"].iloc[-1])
+                best_row = d[d["is_best"]].iloc[-1] if d["is_best"].any() else d.iloc[0]
+
+                if live:
+                    seed_best = float(p0["seed_best_db"])
+                    n_seeds = int(p0["n_seeds"])
+                    st.caption(
+                        f"**Bayesian optimization over (w7, h_bend, l_junction) "
+                        f"simultaneously.** The GP surrogate was first fitted on the "
+                        f"**{n_seeds} pre-existing sweep designs** — they are not "
+                        "shown as iterations below, but their loss landscape told "
+                        "the optimizer where the promising regions are before a "
+                        "single new FlexCredit was spent. Only **new** FDTD "
+                        "evaluations appear in the plot and table.")
+                    stat_cards([
+                        ("New evaluations", f"{len(d)}"),
+                        ("Free GP seeds", f"{n_seeds}"),
+                        ("Best pre-existing (seed)", f"{seed_best:.4f} dB"),
+                        ("Best found", f"{best:.4f} dB"),
+                        ("Improvement vs best seed", f"{seed_best - best:+.4f} dB"),
+                    ])
+                    hover = [f"w7={r['w7']} · h_bend={r['h_bend']} · "
+                             f"l_junction={r['l_junction']}" for _, r in d.iterrows()]
+                    fig = go.Figure()
+                    fig.add_trace(go.Scatter(
+                        x=d["iteration"], y=d["objective_value"], mode="markers",
+                        marker=dict(color="#ec4899", size=10,
+                                    line=dict(width=1, color="white")),
+                        text=hover, name="new BO evaluation"))
+                    fig.add_trace(go.Scatter(
+                        x=d["iteration"], y=d["best_so_far"], mode="lines",
+                        line=dict(color="#7c3aed", width=2, shape="hv"),
+                        name="best so far (incl. seeds)"))
+                    fig.add_hline(y=seed_best, line=dict(color="#94a3b8", dash="dash"))
+                    fig.update_layout(
+                        title="Optimization progress — new evaluations only "
+                              "(dashed = best pre-existing design)",
+                        xaxis_title="new evaluation #",
+                        yaxis_title="mean insertion loss (dB)")
+                else:
+                    baseline = float(d["objective_value"].iloc[0])
+                    if extras:
+                        ctx = " · ".join(f"{c} = {d[c].iloc[0]} µm" for c in extras)
+                        st.caption(f"Held fixed across all candidates: **{ctx}** — so "
+                                   "the objective differences are attributable to "
+                                   "l_junction alone (apples to apples).")
+                    stat_cards([
+                        ("Candidates", f"{len(d)}"),
+                        ("Baseline (iteration 0)", f"{baseline:.4f} dB"),
+                        ("Best found", f"{best:.4f} dB"),
+                        ("Improvement vs initial", f"−{baseline - best:.4f} dB"),
+                        ("Best l_junction", f"{best_row['l_junction']} µm"),
+                    ])
+                    ds = d.sort_values("l_junction")
+                    fig = go.Figure()
+                    fig.add_trace(go.Scatter(
+                        x=ds["l_junction"], y=ds["objective_value"], mode="lines",
+                        line=dict(color="#d4cff0", width=1.5, dash="dot"),
+                        showlegend=False))
+                    fig.add_trace(go.Scatter(
+                        x=d["l_junction"], y=d["objective_value"], mode="markers+text",
+                        marker=dict(color=["#ec4899" if b else "#7c3aed"
+                                           for b in d["is_best"]], size=10, opacity=0.9),
+                        text=[str(i) for i in d["iteration"]],
+                        textposition="top center",
+                        textfont=dict(size=10, color="#7168a8"),
+                        name="evaluated candidate"))
+                    fig.add_hline(y=baseline, line=dict(color="#94a3b8", dash="dash"))
+                    fig.update_layout(
+                        title="Objective vs l_junction — the only varied parameter "
+                              "(markers numbered by iteration; dashed = initial design)",
+                        xaxis_title="l_junction (µm)",
+                        yaxis_title="mean insertion loss (dB)")
+                events = [(st.plotly_chart(
+                    style_fig(fig), use_container_width=True,
+                    key=f"opt_fig_{device_type}",
+                    on_select="rerun", selection_mode="points"),
+                    0 if live else 1)]
+                sel_mask = pd.Series(False, index=d.index)
+                for ev, pink_curve in events:
+                    try:
+                        pts = ev["selection"]["points"]
+                    except Exception:
+                        pts = []
+                    for pt in pts:
+                        if pt.get("curve_number") != pink_curve:
+                            continue
+                        idx = pt.get("point_index")
+                        if idx is not None and 0 <= int(idx) < len(d):
+                            sel_mask.iloc[int(idx)] = True
+                tbl = d[["iteration", "l_junction"] + extras
+                        + ["objective_value", "best_so_far", "is_best", "run_id"]].round(4)
+                tbl = tbl.rename(columns={
+                    "objective_value": "mean insertion loss (dB)",
+                    "best_so_far": "best so far (dB)"})
+                if sel_mask.any():
+                    st.caption("Showing your **clicked point(s)** highlighted below — "
+                               "click elsewhere or press Esc on the plot to clear.")
+                render_table(tbl, highlight_mask=sel_mask)
+                st.caption(
+                    "Click any pink point in the plot above to highlight its row. "
+                    "Each row records the full parameter set the GP proposed and "
+                    "the loss the real FDTD job measured; is_best marks iterations "
+                    "that set a new record.")
 
     with t_meta:
         section(f"{nice} — component metadata",
@@ -361,10 +640,11 @@ def render_tidy3d(device_type: str, nice: str):
 
     with t_ov:
         section(f"{nice} — overview", "Real Tidy3D FDTD sweep")
-        swept = [c for c in feats if df[c].nunique(dropna=True) > 1]
+        ov = df[~df["design_id"].astype(str).str.startswith("D_YJ_OPT")]
+        swept = [c for c in feats if ov[c].nunique(dropna=True) > 1]
         if not swept:
             st.info("No geometry parameter varies in this sweep."); st.stop()
-        corr = dd.correlations(df, swept, "simulated_loss_db")
+        corr = dd.correlations(ov, swept, "simulated_loss_db")
         dom_col = corr.index[0] if len(corr) else swept[0]
         key_col = st.selectbox(
             "Geometry parameter (drives both plots)", swept,
@@ -396,13 +676,14 @@ def render_tidy3d(device_type: str, nice: str):
                         fig.add_trace(go.Scatter(x=g["wavelength_nm"], y=g["loss_db"],
                                                  mode="lines", name=f"{tag}: {did}",
                                                  line=dict(color=color, width=2.6)))
-                fig.update_layout(title=f"All {len(df)} real spectra — loss vs wavelength",
+                fig.update_layout(title=f"All {len(ov)} original sweep spectra — "
+                                        "loss vs wavelength",
                                   xaxis_title="wavelength (nm)",
                                   yaxis_title="insertion loss (dB)")
                 st.plotly_chart(style_fig(fig), use_container_width=True,
                                 key=f"ov_spectra_{device_type}")
         with c2:
-            st.plotly_chart(style_fig(_geom_loss_fig(df, key_col, label,
+            st.plotly_chart(style_fig(_geom_loss_fig(ov, key_col, label,
                                                      hue_col=dom_col if dom_col != key_col else None,
                                                      hue_name=dd.param_label(dom_col).split(" (")[0])),
                             use_container_width=True, key=f"ov_geom_{device_type}")
@@ -1004,7 +1285,7 @@ def _run_pipeline_checks() -> list[dict]:
         "captures) have a measurement row and a registered artifact.",
         "assert len(manifest) == count(simulation_runs)\n"
         "assert count(measurements) == count(raw_artifacts) == 102",
-        "53 designs → 53 runs · 102 measurements ↔ 102 artifacts",
+        f"{len(mf)} designs → {len(mf)} runs · 102 measurements ↔ 102 artifacts",
         f"{len(mf)} designs → {n_runs} runs · {n_meas} measurements ↔ {n_arts} artifacts",
         ok)
 

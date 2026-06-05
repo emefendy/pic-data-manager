@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import math
+from collections import defaultdict
 from typing import Optional
 
 from tidy3d_pipeline.models import OptimizationRecord, new_id
@@ -14,19 +15,27 @@ def optimize_over_real_sweep(
     param: str = "l_junction",
     metric_name: str = "insertion_loss_mean",
     study_id: Optional[str] = None,
+    context_params: tuple[str, ...] = ("w7", "h_bend"),
 ) -> dict:
     runs = store.compare_runs(component_id, metric_name)
-    candidates = []
+    groups: dict[tuple, list] = defaultdict(list)
     for _, r in runs.iterrows():
         g = r["geometry_snapshot"] or {}
         if param in g and isinstance(g[param], (int, float)):
-            candidates.append((float(g[param]), float(r["metric_value"]), r["run_id"]))
-    if not candidates:
+            ctx = tuple(g.get(c) for c in context_params)
+            groups[ctx].append((float(g[param]), float(r["metric_value"]), r["run_id"]))
+    if not groups:
         raise ValueError(f"No runs of '{component_id}' carry numeric geometry param '{param}'. "
                          f"Available params vary by component; check geometry_snapshot.")
 
-    candidates.sort(key=lambda x: x[0])
-    study_id = study_id or new_id("study", component_id, param)
+    def slice_rank(ctx):
+        c = groups[ctx]
+        return (len({p for p, _, _ in c}), -min(o for _, o, _ in c))
+
+    context = max(groups, key=slice_rank)
+    candidates = sorted(groups[context], key=lambda x: x[0])
+    context_dict = {c: v for c, v in zip(context_params, context) if v is not None}
+    study_id = study_id or new_id("study", component_id, param, str(context))
 
     best = math.inf
     best_param = None
@@ -41,12 +50,12 @@ def optimize_over_real_sweep(
         store.add_optimization_record(OptimizationRecord(
             record_id=new_id("opt", study_id, str(i)),
             study_id=study_id, component_id=component_id, iteration=i,
-            parameters={param: pval}, objective_name=metric_name,
+            parameters={param: pval, **context_dict}, objective_name=metric_name,
             objective_value=obj, best_so_far=best, is_best=is_best, run_id=run_id,
         ))
 
     return {
-        "study_id": study_id, "param": param,
+        "study_id": study_id, "param": param, "context": context_dict,
         "best_param": best_param, "best_objective": best,
         "baseline_objective": baseline,
         "improvement_db": (baseline - best) if baseline is not None else None,

@@ -21,12 +21,6 @@ def min_insertion_loss_db(transmission: np.ndarray) -> float:
     return float(np.min(insertion_loss_db(transmission)))
 
 
-def extinction_ratio_db(t_on: np.ndarray, t_off: np.ndarray) -> float:
-    on = float(np.mean(np.clip(t_on, 1e-12, None)))
-    off = float(np.mean(np.clip(t_off, 1e-12, None)))
-    return 10.0 * np.log10(on / off)
-
-
 def bandwidth_3db_nm(wavelength_um: np.ndarray, transmission: np.ndarray,
                      threshold_db: float = 3.0) -> float:
     wl = np.asarray(wavelength_um, dtype=float)
@@ -42,11 +36,6 @@ def bandwidth_3db_nm(wavelength_um: np.ndarray, transmission: np.ndarray,
         hi += 1
     width_um = wl[hi] - wl[lo]
     return float(width_um * 1000.0)
-
-
-def resonance_wavelength_um(wavelength_um: np.ndarray, transmission: np.ndarray) -> float:
-    wl = np.asarray(wavelength_um, dtype=float)
-    return float(wl[int(np.argmin(transmission))])
 
 
 def check_spectrum(df: pd.DataFrame, transmission_col: str = "transmission") -> list[str]:

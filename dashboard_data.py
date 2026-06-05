@@ -177,17 +177,7 @@ def shap_attributions(X: pd.DataFrame, y: pd.Series) -> dict:
             "features": list(Xv.columns), "base": base, "row_index": row_index}
 
 
-def anomaly_flags(X: pd.DataFrame, contamination: float = 0.1) -> tuple[np.ndarray, np.ndarray]:
-    from sklearn.ensemble import IsolationForest
-    Xv = X.fillna(X.median(numeric_only=True)).fillna(0.0).to_numpy(dtype=float)
-    iso = IsolationForest(contamination=contamination, random_state=0)
-    raw = iso.fit_predict(Xv)
-    score = -iso.score_samples(Xv)
-    return (raw == -1).astype(int), score
-
-
 PIPELINE_ROOT = ROOT / "data" / "tidy3d_processed"
-HDF5_DIR = ROOT / "notebooks" / "data"
 
 
 def ensure_tidy3d_pipeline_store(root: Path = PIPELINE_ROOT, rebuild: bool = False):
@@ -224,44 +214,6 @@ def duckdb_preview(db_path, table: str, n: int = 20) -> pd.DataFrame:
         con.close()
 
 
-def read_source(rel_path: str) -> str:
-    p = ROOT / rel_path
-    return p.read_text() if p.exists() else f"(not found: {rel_path})"
-
-
-def residual_anomalies(df: pd.DataFrame, feature_cols: list[str], target: str,
-                       z_thresh: float = 2.0,
-                       categorical: Optional[list[str]] = None):
-    from sklearn.ensemble import RandomForestRegressor
-    from sklearn.model_selection import KFold, cross_val_predict
-
-    out = df.copy()
-    out["predicted"] = np.nan
-    out["residual"] = np.nan
-    out["is_anomaly"] = "normal"
-
-    X = build_feature_matrix(df, feature_cols, categorical=categorical)
-    y = pd.to_numeric(df[target], errors="coerce")
-    mask = y.notna() & X.notna().all(axis=1)
-    n = int(mask.sum())
-    if n < 8:
-        return out, {"ok": False, "n": n}
-
-    Xv, yv = X[mask].to_numpy(dtype=float), y[mask].to_numpy(dtype=float)
-    pred = cross_val_predict(RandomForestRegressor(n_estimators=300, random_state=0),
-                             Xv, yv, cv=KFold(n_splits=min(5, n), shuffle=True, random_state=0))
-    resid = yv - pred
-    z = (resid - resid.mean()) / (resid.std() or 1.0)
-    flags = np.abs(z) >= z_thresh
-
-    idx = np.where(mask.to_numpy())[0]
-    out.iloc[idx, out.columns.get_loc("predicted")] = pred
-    out.iloc[idx, out.columns.get_loc("residual")] = resid
-    lab = np.where(flags, "anomaly", "normal")
-    out.iloc[idx, out.columns.get_loc("is_anomaly")] = lab
-    return out, {"ok": True, "n": n, "n_anom": int(flags.sum())}
-
-
 def load_component_record(component_type: str) -> Optional[dict]:
     import duckdb
 
@@ -284,6 +236,27 @@ def load_component_record(component_type: str) -> Optional[dict]:
             except Exception:
                 pass
     return rec
+
+
+def load_optimization_records(component_id: str) -> pd.DataFrame:
+    import duckdb
+
+    db = PIPELINE_ROOT / "tidy3d.duckdb"
+    if not db.exists():
+        return pd.DataFrame()
+    con = duckdb.connect(str(db), read_only=True)
+    try:
+        df = con.execute(
+            "SELECT study_id, iteration, parameters, objective_name, "
+            "objective_value, best_so_far, is_best, run_id, created_at "
+            "FROM optimization_records WHERE component_id = ? "
+            "ORDER BY created_at, iteration", [component_id]).df()
+    finally:
+        con.close()
+    if len(df):
+        df["parameters"] = df["parameters"].map(
+            lambda s: json.loads(s) if isinstance(s, str) else (s or {}))
+    return df
 
 
 def fit_two_stage_fringe(v_dc, pd_mv, n_starts: int = 60, seed: int = 0) -> dict:
@@ -381,74 +354,9 @@ def _tidy3d_store():
     return PicStore(PIPELINE_ROOT, read_only=True)
 
 
-def q_runs_for_component(component_id: str) -> pd.DataFrame:
-    s = _tidy3d_store()
-    try:
-        df = s.runs_for_component(component_id)
-        cols = [c for c in ["run_id", "component_id", "tool", "wl_min_um", "wl_max_um",
-                            "n_wavelengths", "geometry_snapshot"] if c in df.columns]
-        return df[cols]
-    finally:
-        s.close()
-
-
-def q_compare_variants(component_type: str, metric_name: str) -> pd.DataFrame:
-    s = _tidy3d_store()
-    try:
-        return s.compare_variants(component_type, metric_name)[
-            ["run_id", "geometry_snapshot", "metric_value", "units"]]
-    finally:
-        s.close()
-
-
-def q_filter_by_geometry(key: str, min_val=None, max_val=None) -> pd.DataFrame:
-    s = _tidy3d_store()
-    try:
-        return s.filter_runs_by_geometry(key, min_val=min_val, max_val=max_val)[
-            ["run_id", "component_id", "geom_value"]]
-    finally:
-        s.close()
-
-
-def q_metrics(component_id=None, metric_name=None) -> pd.DataFrame:
-    s = _tidy3d_store()
-    try:
-        df = s.metrics(component_id=component_id or None, metric_name=metric_name or None)
-        return df[["component_id", "metric_name", "metric_value", "units", "run_id"]]
-    finally:
-        s.close()
-
-
 def geometry_param_names() -> list[str]:
     df = load_tidy3d_designs()
     return [c[len("geom_"):] for c in tidy3d_geometry_features(df)]
-
-
-def q_lab_captures(rep_hz=None, edge_ns=None, vlbl=None) -> pd.DataFrame:
-    s = open_screening_store()
-    try:
-        return s.captures(rep_hz=rep_hz, edge_ns=edge_ns, vlbl=vlbl)
-    finally:
-        s.close()
-
-
-def q_lab_metrics() -> pd.DataFrame:
-    s = open_screening_store()
-    try:
-        return s.device_metrics_summary()
-    finally:
-        s.close()
-
-
-def q_lab_features(sort_by: Optional[str] = None) -> pd.DataFrame:
-    s = open_screening_store()
-    try:
-        ft = s.feature_table()
-    finally:
-        s.close()
-    if sort_by and sort_by in ft.columns:
-        ft = ft.sort_values(sort_by, ascending=False)
-    return ft.round(3)
 
 
 REALLAB_SCHEMA_HINT = """
@@ -504,14 +412,3 @@ def rel(path) -> str:
         return str(path)
 
 
-def raw_data_inventory() -> pd.DataFrame:
-    import glob
-    rows = [
-        ("data/tidy3d_raw/manifest.parquet", "Parquet", "real-design index + geometry",
-         1 if MANIFEST.exists() else 0),
-        ("data/tidy3d_raw/*.json", "JSON", "per-design transmission/loss spectra",
-         len(glob.glob(str(SPECTRA_DIR / "*.json")))),
-        ("notebooks/data/**/*.hdf5", "HDF5", "raw Tidy3D FDTD field/monitor output",
-         len(glob.glob(str(HDF5_DIR / "**" / "*.hdf5"), recursive=True))),
-    ]
-    return pd.DataFrame(rows, columns=["path", "format", "contents", "count"])

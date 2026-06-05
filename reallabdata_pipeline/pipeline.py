@@ -21,7 +21,7 @@ def run_pipeline(dataset=None, root: str = "data/reallabdata_processed", figdir:
     Path(figdir).mkdir(parents=True, exist_ok=True)
     store = ScreeningStore(root)
 
-    device_id = ingest.ingest_device_card(store, str(ds / "device_card.md"))
+    ingest.ingest_device_card(store, str(ds / "device_card.md"))
     static_mid = ingest.ingest_static_sweep(store, str(ds / "static_vdc_sweep.npz"))
     fra_mid = ingest.ingest_fra(store, str(ds / "fra_smallsignal.npz"))
     cap_ids = ingest.ingest_captures(store, str(ds / "captures"), limit=capture_limit,

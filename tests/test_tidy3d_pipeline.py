@@ -8,7 +8,7 @@ import pandas as pd
 import pytest
 
 from tidy3d_pipeline import analysis
-from tidy3d_pipeline.components import EULER_BEND, Y_JUNCTION
+from tidy3d_pipeline.components import Y_JUNCTION
 from tidy3d_pipeline.ingest import ingest_real_dataset, ingest_spectrum
 from tidy3d_pipeline.models import AnalysisResult, Component, SimulationRun
 from tidy3d_pipeline.optimize import optimize_over_real_sweep

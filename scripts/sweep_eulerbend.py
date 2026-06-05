@@ -99,7 +99,6 @@ def bend_to_structure(x, y, w, t, R_eff):
 
 
 def build_sim(x_bend, y_bend, w, R_eff):
-    si   = td.Medium(permittivity=N_SI**2)
     sio2 = td.Medium(permittivity=N_SIO2**2)
 
     lda0   = 1.55

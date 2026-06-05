@@ -10,7 +10,6 @@ import numpy as np
 
 from tidy3d_pipeline.components import EULER_BEND, Y_JUNCTION
 from tidy3d_pipeline.ingest import ingest_real_dataset
-from tidy3d_pipeline.optimize import optimize_over_real_sweep
 from tidy3d_pipeline.store import PicStore
 
 
@@ -27,8 +26,6 @@ def run_demo(manifest: str = "data/tidy3d_raw/manifest.parquet", spectra_dir: st
     store = PicStore(root)
 
     run_ids = ingest_real_dataset(store, manifest, spectra_dir)
-
-    opt = optimize_over_real_sweep(store, component_id="y_junction", param="l_junction")
 
     figs = {}
 
@@ -67,24 +64,13 @@ def run_demo(manifest: str = "data/tidy3d_raw/manifest.parquet", spectra_dir: st
         p = Path(figdir) / "component_comparison.png"
         fig.tight_layout(); fig.savefig(p, dpi=130); plt.close(fig); figs["components"] = str(p)
 
-    hist = store.optimization_history(opt["study_id"])
-    if len(hist):
-        fig, ax = plt.subplots(figsize=(7, 4))
-        ax.plot(hist["iteration"], hist["objective_value"], "o-", label="candidate")
-        ax.plot(hist["iteration"], hist["best_so_far"], "s--", label="best so far")
-        ax.set_xlabel("Iteration (sweep order by l_junction)")
-        ax.set_ylabel("Mean insertion loss (dB)")
-        ax.set_title("Y-junction optimization progress"); ax.legend(); ax.grid(alpha=0.3)
-        p = Path(figdir) / "optimization_progress.png"
-        fig.tight_layout(); fig.savefig(p, dpi=130); plt.close(fig); figs["optimization"] = str(p)
-
     summary = store.summary_table()
     summary_path = Path(figdir) / "summary_table.csv"
     summary.to_csv(summary_path, index=False)
 
     store.close()
     return {"root": root, "n_runs": len(run_ids), "figures": figs,
-            "summary": summary, "summary_csv": str(summary_path), "optimization": opt}
+            "summary": summary, "summary_csv": str(summary_path)}
 
 
 if __name__ == "__main__":
@@ -92,9 +78,6 @@ if __name__ == "__main__":
     print(f"Ingested {out['n_runs']} real Tidy3D runs.\n")
     print("=== SUMMARY (per component / metric) ===")
     print(out["summary"].to_string(index=False))
-    print("\n=== OPTIMIZATION (Y-junction, real sweep) ===")
-    for k, v in out["optimization"].items():
-        print(f"  {k}: {v}")
     print("\nFigures:")
     for k, v in out["figures"].items():
         print(f"  {k}: {v}")
