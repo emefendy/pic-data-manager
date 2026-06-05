@@ -1,8 +1,10 @@
 <p align="center">
-  <img src="docs/dashboard_tidy3d.png" width="24%" />
-  <img src="docs/dashboard_labdata.png" width="24%" />
-  <img src="docs/dashboard_queries.png" width="24%" />
-  <img src="docs/dashboard_optimization.png" width="24%" />
+  <img src="docs/dashboard_tidy3d.png" width="49%" />
+  <img src="docs/dashboard_labdata.png" width="49%" />
+</p>
+<p align="center">
+  <img src="docs/dashboard_queries.png" width="49%" />
+  <img src="docs/dashboard_optimization.png" width="49%" />
 </p>
 
 A reproducible data platform for photonic-integrated-circuit (PIC) development,
