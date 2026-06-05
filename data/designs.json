@@ -424,7 +424,7 @@
     "device_type": "y_junction",
     "design_version": "v1",
     "layout_file": "gds/D_YJUNC_001.gds",
-    "simulation_file": "sim/D_YJUNC_001_simulation.hdf5",
+    "simulation_file": "notebooks/data/simulation_data.hdf5",
     "target_wavelength_nm": 1550,
     "designer": "simulation_import",
     "simulated_loss_db": 0.15460937914140715,

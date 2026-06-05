@@ -1,16 +1,3 @@
-"""
-sweep_yjunction.py
-------------------
-Runs 30 Y-junction FDTD simulations with varied geometry parameters,
-downloads each result, and ingests them all into data/designs.json.
-
-Usage (from project root):
-    python3 scripts/sweep_yjunction.py
-
-Requires a configured Tidy3D API key (~/.tidy3d/config).
-Estimated cost: ~30 x 0.116 = 3.5 FlexCredits.
-Each job takes ~1-2 minutes. Total wall time: ~30-60 min running in parallel.
-"""
 
 import json
 import time
@@ -22,23 +9,19 @@ import tidy3d.web as web
 
 ROOT = Path(__file__).resolve().parents[1]
 DATA_DIR = ROOT / "data"
-SPECTRA_DIR = DATA_DIR / "spectra"
+SPECTRA_DIR = DATA_DIR / "tidy3d_raw"
 HDF5_DIR = ROOT / "notebooks" / "data" / "sweep"
 SPECTRA_DIR.mkdir(parents=True, exist_ok=True)
 HDF5_DIR.mkdir(parents=True, exist_ok=True)
 
-# ── Parameter sweep ───────────────────────────────────────────────────────────
-# Vary three key parameters around the optimized baseline.
-# 5 x 3 x 2 = 30 combinations exactly.
 
-W7_VALUES   = [1.2, 1.3, 1.4, 1.5, 1.6]   # center junction width (µm)
-H_BEND_VALUES = [1.5, 2.0, 2.5]            # vertical bend offset (µm)
-L_JUNCTION_VALUES = [1.5, 2.0]             # junction length (µm)
+W7_VALUES   = [1.2, 1.3, 1.4, 1.5, 1.6]
+H_BEND_VALUES = [1.5, 2.0, 2.5]
+L_JUNCTION_VALUES = [1.5, 2.0]
 
 COMBOS = list(itertools.product(W7_VALUES, H_BEND_VALUES, L_JUNCTION_VALUES))
 assert len(COMBOS) == 30, f"Expected 30 combos, got {len(COMBOS)}"
 
-# Fixed parameters (baseline optimized design)
 T       = 0.22
 W1      = 0.5
 W2      = 0.5
@@ -58,8 +41,6 @@ L_OUT   = 1.0
 INF_EFF = 100
 
 
-# ── Simulation builder ────────────────────────────────────────────────────────
-
 def build_simulation(w7: float, h_bend: float, l_junction: float) -> td.Simulation:
     si   = td.material_library["cSi"]["Palik_Lossless"]
     sio2 = td.material_library["SiO2"]["Palik_Lossless"]
@@ -70,7 +51,6 @@ def build_simulation(w7: float, h_bend: float, l_junction: float) -> td.Simulati
     freqs = td.C_0 / ldas
     fwidth = 0.5 * (np.max(freqs) - np.min(freqs))
 
-    # Junction polygon — use w7 as the swept center width
     widths = np.array([W1, W2, W3, W4, W5, W6, w7, W8, W9, W10, W11, W12, W13])
     x = np.linspace(L_IN, L_IN + l_junction, 13)
     x = np.concatenate((x, np.flipud(x)))
@@ -82,26 +62,21 @@ def build_simulation(w7: float, h_bend: float, l_junction: float) -> td.Simulati
         medium=si,
     )
 
-    # S-bend waveguides (sine curve, no photonforge needed)
     x_start = L_IN + l_junction
     n_pts   = 200
 
     def sbend_vertices(sign):
-        """Generate polygon vertices for one S-bend arm + trailing straight."""
         xs = np.linspace(0, L_BEND, n_pts)
         ys = (xs * h_bend / L_BEND
               - h_bend / (2 * np.pi) * np.sin(2 * np.pi * xs / L_BEND))
         ys *= sign
 
-        # centerline offset: arm starts at ±(W13/2 - W1/2)
         y_offset = sign * (W13 / 2 - W1 / 2)
         ys += y_offset
 
-        # extend to effective infinity
         xs_full = np.append(xs + x_start, x_start + L_BEND + INF_EFF)
         ys_full = np.append(ys, ys[-1])
 
-        # build closed polygon with waveguide width W1
         top_x = xs_full
         top_y = ys_full + W1 / 2
         bot_x = np.flipud(xs_full)
@@ -168,8 +143,6 @@ def build_simulation(w7: float, h_bend: float, l_junction: float) -> td.Simulati
     return sim, freqs
 
 
-# ── Result extraction ─────────────────────────────────────────────────────────
-
 def extract_and_ingest(design_id, sim_data, freqs, params):
     ldas = td.C_0 / freqs
 
@@ -178,13 +151,12 @@ def extract_and_ingest(design_id, sim_data, freqs, params):
     T_total = 2 * T_top
     loss_db = -10 * np.log10(T_total)
 
-    # bandwidth: range where loss within 0.5 dB of minimum
     threshold = np.min(loss_db) + 0.5
     in_band   = ldas[loss_db <= threshold]
     if len(in_band) >= 2:
-        f_min = td.C_0 / np.max(in_band)  # Hz (Tidy3D units: length in µm)
-        f_max = td.C_0 / np.min(in_band)  # Hz
-        bw_ghz = float((f_max - f_min) / 1e9)  # Hz → GHz
+        f_min = td.C_0 / np.max(in_band)
+        f_max = td.C_0 / np.min(in_band)
+        bw_ghz = float((f_max - f_min) / 1e9)
     else:
         bw_ghz = 0.0
 
@@ -195,7 +167,6 @@ def extract_and_ingest(design_id, sim_data, freqs, params):
         "max_loss_db":             float(np.max(loss_db)),
     }
 
-    # Save spectrum
     spectrum = {
         "wavelengths_um":   ldas.tolist(),
         "T_total":          T_total.tolist(),
@@ -203,7 +174,6 @@ def extract_and_ingest(design_id, sim_data, freqs, params):
     }
     (SPECTRA_DIR / f"{design_id}.json").write_text(json.dumps(spectrum, indent=2))
 
-    # Build design record
     record = {
         "design_id":               design_id,
         "device_type":             "y_junction",
@@ -220,7 +190,6 @@ def extract_and_ingest(design_id, sim_data, freqs, params):
         "sim_params":              json.dumps({**params, **scalars}),
     }
 
-    # Append/update designs.json
     path = DATA_DIR / "designs.json"
     records = json.loads(path.read_text()) if path.exists() else []
     ids = [r["design_id"] for r in records]
@@ -232,8 +201,6 @@ def extract_and_ingest(design_id, sim_data, freqs, params):
 
     print(f"  loss={scalars['simulated_loss_db']:.4f} dB  bw={bw_ghz:.1f} GHz  → ingested")
 
-
-# ── Main ──────────────────────────────────────────────────────────────────────
 
 def main():
     print(f"Submitting {len(COMBOS)} jobs to Tidy3D...\n")

@@ -1,18 +1,3 @@
-"""
-sweep_eulerbend.py
-------------------
-Runs 30 Euler waveguide bend FDTD simulations with varied geometry parameters,
-downloads each result, and ingests them into data/designs.json.
-
-Varies: R_eff (effective radius), A (clothoid parameter), w (waveguide width)
-5 x 3 x 2 = 30 combinations.
-
-Usage (from project root):
-    python3 scripts/sweep_eulerbend.py
-
-Each job runs both a circular bend baseline AND the Euler bend (2 jobs per combo).
-Estimated cost: ~60 x 0.042 = 2.5 FlexCredits total.
-"""
 
 import json
 import itertools
@@ -25,29 +10,24 @@ import tidy3d.web as web
 
 ROOT       = Path(__file__).resolve().parents[1]
 DATA_DIR   = ROOT / "data"
-SPECTRA_DIR = DATA_DIR / "spectra"
+SPECTRA_DIR = DATA_DIR / "tidy3d_raw"
 HDF5_DIR   = ROOT / "notebooks" / "data" / "sweep_euler"
 SPECTRA_DIR.mkdir(parents=True, exist_ok=True)
 HDF5_DIR.mkdir(parents=True, exist_ok=True)
 
-# ── Parameter sweep ───────────────────────────────────────────────────────────
-# 5 x 3 x 2 = 30 combinations
 
-R_EFF_VALUES = [3.0, 3.5, 4.0, 4.5, 5.0]   # effective bend radius (µm)
-A_VALUES     = [2.0, 2.2, 2.4]              # clothoid parameter
-W_VALUES     = [0.38, 0.42]                 # waveguide width (µm)
+R_EFF_VALUES = [3.0, 3.5, 4.0, 4.5, 5.0]
+A_VALUES     = [2.0, 2.2, 2.4]
+W_VALUES     = [0.38, 0.42]
 
 COMBOS = list(itertools.product(R_EFF_VALUES, A_VALUES, W_VALUES))
 assert len(COMBOS) == 30
 
-# Fixed
 T      = 0.21
 N_SI   = 3.476
 N_SIO2 = 1.444
 INF_EFF = 100
 
-
-# ── Euler curve geometry ──────────────────────────────────────────────────────
 
 def euler_curve(L_max, A, num_points=50):
     Ls = np.linspace(0, L_max, num_points)
@@ -118,8 +98,6 @@ def bend_to_structure(x, y, w, t, R_eff):
     )
 
 
-# ── Simulation builder ────────────────────────────────────────────────────────
-
 def build_sim(x_bend, y_bend, w, R_eff):
     si   = td.Medium(permittivity=N_SI**2)
     sio2 = td.Medium(permittivity=N_SIO2**2)
@@ -165,8 +143,6 @@ def build_sim(x_bend, y_bend, w, R_eff):
     return sim, freqs
 
 
-# ── Extraction + ingestion ────────────────────────────────────────────────────
-
 def extract_and_ingest(design_id, sim_data_euler, sim_data_circular, freqs, params):
     ldas = td.C_0 / freqs
 
@@ -183,9 +159,9 @@ def extract_and_ingest(design_id, sim_data_euler, sim_data_circular, freqs, para
         in_band   = ldas[loss_db <= threshold]
         if len(in_band) < 2:
             return 0.0
-        f_min = td.C_0 / np.max(in_band)  # Hz (Tidy3D units: length in µm)
-        f_max = td.C_0 / np.min(in_band)  # Hz
-        return float((f_max - f_min) / 1e9)  # Hz → GHz
+        f_min = td.C_0 / np.max(in_band)
+        f_max = td.C_0 / np.min(in_band)
+        return float((f_max - f_min) / 1e9)
 
     scalars = {
         "simulated_loss_db":              float(np.mean(loss_euler)),
@@ -236,10 +212,7 @@ def extract_and_ingest(design_id, sim_data_euler, sim_data_circular, freqs, para
     )
 
 
-# ── Main ──────────────────────────────────────────────────────────────────────
-
 def main():
-    # Load already-ingested design IDs so we can skip re-running them
     designs_path = DATA_DIR / "designs.json"
     existing_ids = set()
     if designs_path.exists():

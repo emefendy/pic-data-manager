@@ -1,9 +1,0 @@
-component,type,tool,data_source,metric_name,mean_value,best_value,n_runs,units
-Euler (clothoid) waveguide bend,euler_bend,tidy3d,real,bandwidth_3db,100.0,100.0,22,nm
-Euler (clothoid) waveguide bend,euler_bend,tidy3d,real,insertion_loss_at_center,0.0249,0.003,22,dB
-Euler (clothoid) waveguide bend,euler_bend,tidy3d,real,insertion_loss_mean,0.0271,0.0051,22,dB
-Euler (clothoid) waveguide bend,euler_bend,tidy3d,real,insertion_loss_min,0.021,0.003,22,dB
-Compact SOI Y-junction (1x2 splitter),y_junction,tidy3d,real,bandwidth_3db,100.0,100.0,31,nm
-Compact SOI Y-junction (1x2 splitter),y_junction,tidy3d,real,insertion_loss_at_center,0.4511,0.1325,31,dB
-Compact SOI Y-junction (1x2 splitter),y_junction,tidy3d,real,insertion_loss_mean,0.4646,0.1546,31,dB
-Compact SOI Y-junction (1x2 splitter),y_junction,tidy3d,real,insertion_loss_min,0.4077,0.1284,31,dB

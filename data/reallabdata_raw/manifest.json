@@ -1,0 +1,34 @@
+{
+  "dataset": "ScreeningDatasetV2",
+  "static_vdc_sweep": {
+    "n_points": 201,
+    "V_DC_range_v": [
+      -5.0,
+      5.0
+    ],
+    "n_traces_per_point": 32,
+    "PD_noise_sigma_per_trace_v": 0.0005,
+    "stamp": "20260520_175400"
+  },
+  "fra_smallsignal": {
+    "n_freqs": 401,
+    "freq_range_hz": [
+      100.0,
+      151356124.84362072
+    ],
+    "drive_vpp": 0.05,
+    "V_DC_quadrature_v": -1.2,
+    "stamp": "20260520_180100"
+  },
+  "captures": {
+    "source": "v1 ScreeningDataset (unchanged)",
+    "count": 100
+  },
+  "lab_log_examples": [
+    "2026-04-12_laser_swap.md",
+    "2026-04-23_anomalous_fringe.md",
+    "2026-05-02_moku_wedged.md",
+    "2026-05-11_device_remount.md",
+    "2026-05-19_unexplained_drift.md"
+  ]
+}

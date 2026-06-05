@@ -5,15 +5,14 @@ streamlit
 plotly
 statsmodels
 anthropic
-torch
-shap
+shap           
 tidy3d
 photonforge
 gdstk
 jupyterlab
-# ScreeningDatasetV2 pipeline (screening/ package + app_real.py real-data dashboard)
 duckdb
 zarr
 pyarrow
+h5py            
 scipy
 pydantic

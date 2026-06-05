@@ -16,3 +16,14 @@ env/
 # Editor
 .vscode/
 .idea/
+
+# Legacy SQLite (superseded by Parquet manifest + DuckDB) — delete locally
+pic_data.db
+
+# Processed pipeline stores — REGENERABLE from the committed raw inputs
+# (raw inputs that ARE committed: data/spectra/, data/reallabdata_raw/,
+#  notebooks/data/, data/designs.json). Rebuild with:
+#   python -m picpipe.cli demo      → data/tidy3d_processed/
+#   streamlit "Build" button / screening.cli demo → data/reallabdata_processed/
+data/tidy3d_processed/
+data/reallabdata_processed/
