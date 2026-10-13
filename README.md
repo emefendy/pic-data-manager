@@ -71,14 +71,7 @@ pip install -r requirements.txt
 
 ### Natural-language queries (API key)
 
-The dashboard's natural-language → SQL boxes use the Anthropic API. To enable
-them, create `.streamlit/secrets.toml` (gitignored) with the key below:
-
-```toml
-ANTHROPIC_API_KEY = "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"
-```
-
-Everything else in the dashboard works without it.
+Add Anthrophic API Key to toml file. 
 
 ## Run the demo
 
